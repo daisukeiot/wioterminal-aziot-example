@@ -34,7 +34,7 @@
 
 #endif // USE_CLI
 
-#define IOT_CONFIG_MODEL_ID					"dtmi:seeedkk:wioterminal:wioterminal_aziot_example;3"
+#define IOT_CONFIG_MODEL_ID					"dtmi:seeedkk:wioterminal:wioterminal_aziot_example;4"
 
 #define TOKEN_LIFESPAN                      3600
 
@@ -42,5 +42,9 @@
 #define TELEMETRY_ACCEL_X					"accelX"
 #define TELEMETRY_ACCEL_Y					"accelY"
 #define TELEMETRY_ACCEL_Z					"accelZ"
-#define TELEMETRY_LIGHT                     "light"
-#define COMMAND_RING_BUZZER					"ringBuzzer"
+#define TELEMETRY_LIGHT           "light"
+#define COMMAND_RING_BUZZER				"ringBuzzer"
+#define TELEMETRY_GPS_LOCATION    "gps"
+#define TELEMETRY_GPS_TYPE        "type"
+#define TELEMETRY_GPS_POINT       "point"
+#define TELEMETRY_GPS_COORDINATE  "coordinates"

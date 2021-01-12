@@ -53,6 +53,15 @@
       "schema": "integer"
     },
     {
+      "@type": "Telemetry",
+      "name": "gps",
+      "displayName": {
+        "en": "GPS Coordinate",
+        "ja": "GPS 位置情報"
+      },
+      "schema": "point"
+    },
+    {
       "@type": "Command",
       "name": "ringBuzzer",
       "displayName": {

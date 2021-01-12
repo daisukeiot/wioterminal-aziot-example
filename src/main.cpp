@@ -4,6 +4,8 @@
 #include "Signature.h"
 #include "AzureDpsClient.h"
 #include "CliMode.h"
+#include <TinyGPS++.h>
+#include <wiring_private.h>
 
 #include <LIS3DHTR.h>
 
@@ -21,6 +23,15 @@
 #define MQTT_PACKET_SIZE 1024
 
 LIS3DHTR<TwoWire> AccelSensor;
+
+static const uint32_t GPSBaud = 9600;
+static Uart GpsOnSerial(&sercom3, PIN_WIRE_SCL, PIN_WIRE_SDA, SERCOM_RX_PAD_1, UART_TX_PAD_0);
+TinyGPSPlus gps;
+TinyGPSCustom ggaLat(gps, "GPGGA", 2);
+TinyGPSCustom ggaLng(gps, "GPGGA", 4);
+double lastLat = 0.0;
+double lastLng = 0.0;
+
 
 const char* ROOT_CA_BALTIMORE =
 "-----BEGIN CERTIFICATE-----\n"
@@ -266,12 +277,53 @@ static az_result SendTelemetry()
     float accelX;
     float accelY;
     float accelZ;
+    double lat = 0.0;
+    double lng = 0.0;
+
+    // Example NMEA messages
+    // $GPGGA,181520.000,4741.5452,N,12207.3874,W,2,8,1.14,80.1,M,-17.2,M,0000,0000*50
+    // $GPGSA,A,3,09,22,06,01,26,04,03,16,,,,,1.40,1.14,0.82*03
+    // $GPGSV,3,1,11,03,74,197,33,04,66,295,36,22,51,168,28,26,39,100,27*70
+    // $GPGSV,3,2,11,51,33,160,35,31,30,053,,09,28,28Sent telemetry 1
+
+    while (GpsOnSerial.available() > 0)
+    {
+        unsigned char cc = GpsOnSerial.read();
+        if (gps.encode(cc))
+        {
+            if (ggaLng.isValid() && ggaLng.isUpdated())
+            {
+                ggaLng.value();
+                lng = gps.location.lng();
+                lat = gps.location.lat();
+
+                if (lng != lastLng)
+                {
+                    lastLng = lng;
+                }
+                else
+                {
+                    lng = 0.0;
+                }
+
+                if (lat != lastLat)
+                {
+                    lastLat = lat;
+                }
+                else
+                {
+                    lat = 0.0;
+                }                
+            }
+        }
+    }
+
     AccelSensor.getAcceleration(&accelX, &accelY, &accelZ);
 
     int light;
     light = analogRead(WIO_LIGHT) * 100 / 1023;
 
-    char telemetry_topic[128];
+    char telemetry_topic[192];
     if (az_result_failed(az_iot_hub_client_telemetry_get_publish_topic(&HubClient, NULL, telemetry_topic, sizeof(telemetry_topic), NULL)))
     {
         Log("Failed az_iot_hub_client_telemetry_get_publish_topic" DLM);
@@ -279,9 +331,10 @@ static az_result SendTelemetry()
     }
 
     az_json_writer json_builder;
-    char telemetry_payload[200];
+    char telemetry_payload[192];
     AZ_RETURN_IF_FAILED(az_json_writer_init(&json_builder, AZ_SPAN_FROM_BUFFER(telemetry_payload), NULL));
     AZ_RETURN_IF_FAILED(az_json_writer_append_begin_object(&json_builder));
+
     AZ_RETURN_IF_FAILED(az_json_writer_append_property_name(&json_builder, AZ_SPAN_LITERAL_FROM_STR(TELEMETRY_ACCEL_X)));
     AZ_RETURN_IF_FAILED(az_json_writer_append_double(&json_builder, accelX, 3));
     AZ_RETURN_IF_FAILED(az_json_writer_append_property_name(&json_builder, AZ_SPAN_LITERAL_FROM_STR(TELEMETRY_ACCEL_Y)));
@@ -290,9 +343,24 @@ static az_result SendTelemetry()
     AZ_RETURN_IF_FAILED(az_json_writer_append_double(&json_builder, accelZ, 3));
     AZ_RETURN_IF_FAILED(az_json_writer_append_property_name(&json_builder, AZ_SPAN_LITERAL_FROM_STR(TELEMETRY_LIGHT)));
     AZ_RETURN_IF_FAILED(az_json_writer_append_int32(&json_builder, light));
-    AZ_RETURN_IF_FAILED(az_json_writer_append_end_object(&json_builder));
-    const az_span out_payload{ az_json_writer_get_bytes_used_in_destination(&json_builder) };
 
+    if (lat != 0.0)
+    {
+        AZ_RETURN_IF_FAILED(az_json_writer_append_property_name(&json_builder, AZ_SPAN_LITERAL_FROM_STR(TELEMETRY_GPS_LOCATION)));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_begin_object(&json_builder));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_property_name(&json_builder, AZ_SPAN_LITERAL_FROM_STR(TELEMETRY_GPS_TYPE)));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_string(&json_builder, AZ_SPAN_LITERAL_FROM_STR(TELEMETRY_GPS_POINT)));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_property_name(&json_builder, AZ_SPAN_LITERAL_FROM_STR(TELEMETRY_GPS_COORDINATE)));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_begin_array(&json_builder));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_double(&json_builder, lng, 6));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_double(&json_builder, lat, 6));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_end_array(&json_builder));
+        AZ_RETURN_IF_FAILED(az_json_writer_append_end_object(&json_builder));
+    }
+
+    AZ_RETURN_IF_FAILED(az_json_writer_append_end_object(&json_builder));
+
+    const az_span out_payload{ az_json_writer_get_bytes_used_in_destination(&json_builder) };
     static int sendCount = 0;
     if (!mqtt_client.publish(telemetry_topic, az_span_ptr(out_payload), az_span_size(out_payload), false))
     {
@@ -408,6 +476,26 @@ static void MqttSubscribeCallbackHub(char* topic, byte* payload, unsigned int le
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// For GPS connected to left side Grove connector
+
+void SERCOM3_0_Handler()
+{
+  GpsOnSerial.IrqHandler();
+}
+void SERCOM3_1_Handler()
+{
+  GpsOnSerial.IrqHandler();
+}
+void SERCOM3_2_Handler()
+{
+  GpsOnSerial.IrqHandler();
+}
+void SERCOM3_3_Handler()
+{
+  GpsOnSerial.IrqHandler();
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // setup and loop
 
 void setup()
@@ -453,6 +541,9 @@ void setup()
     AccelSensor.begin(Wire1);
     AccelSensor.setOutputDataRate(LIS3DHTR_DATARATE_25HZ);
     AccelSensor.setFullScaleRange(LIS3DHTR_RANGE_2G);
+    GpsOnSerial.begin(GPSBaud);
+    pinPeripheral(PIN_WIRE_SCL, PIO_SERCOM_ALT);
+    pinPeripheral(PIN_WIRE_SCL, PIO_SERCOM_ALT);
 
     ////////////////////
     // Connect Wi-Fi
