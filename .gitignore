@@ -1,4 +1,4 @@
-.vscode/
-.pio/
-out/
 .vs/
+.vscode/
+/.pio/
+/out/
