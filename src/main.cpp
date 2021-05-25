@@ -4,6 +4,7 @@
 #include "Signature.h"
 #include "AzureDpsClient.h"
 #include "CliMode.h"
+#include "Gps.h"
 
 #include <LIS3DHTR.h>
 
@@ -286,11 +287,11 @@ static int ConnectToHub(az_iot_hub_client* iot_hub_client, const std::string& ho
     options.model_id = AZ_SPAN_LITERAL_FROM_STR(IOT_CONFIG_MODEL_ID);
     if (az_result_failed(az_iot_hub_client_init(iot_hub_client, hostSpan, deviceIdSpan, &options))) return -1;
 
-    char mqttClientId[128];
+    char mqttClientId[192];
     size_t client_id_length;
     if (az_result_failed(az_iot_hub_client_get_client_id(iot_hub_client, mqttClientId, sizeof(mqttClientId), &client_id_length))) return -4;
 
-    char mqttUsername[256];
+    char mqttUsername[192];
     if (az_result_failed(az_iot_hub_client_get_user_name(iot_hub_client, mqttUsername, sizeof(mqttUsername), NULL))) return -5;
 
     char mqttPassword[300];
@@ -333,12 +334,16 @@ static az_result SendTelemetry()
     int light;
     light = analogRead(WIO_LIGHT) * 100 / 1023;
 
+    GPS_DATA gps_data;
+
     char telemetry_topic[128];
     if (az_result_failed(az_iot_hub_client_telemetry_get_publish_topic(&HubClient, NULL, telemetry_topic, sizeof(telemetry_topic), NULL)))
     {
         Log("Failed az_iot_hub_client_telemetry_get_publish_topic" DLM);
         return AZ_ERROR_NOT_SUPPORTED;
     }
+
+    GetGpsData(&gps_data);
 
     az_json_writer json_builder;
     char telemetry_payload[200];
@@ -352,6 +357,13 @@ static az_result SendTelemetry()
     AZ_RETURN_IF_FAILED(az_json_writer_append_double(&json_builder, accelZ, 3));
     AZ_RETURN_IF_FAILED(az_json_writer_append_property_name(&json_builder, AZ_SPAN_LITERAL_FROM_STR(TELEMETRY_LIGHT)));
     AZ_RETURN_IF_FAILED(az_json_writer_append_int32(&json_builder, light));
+
+    if (gps_data.lng != 0.0)
+    {
+        DisplayPrintf("GPS %f %f", gps_data.lng, gps_data.lat);
+        AZ_RETURN_IF_FAILED(Append_Gps_Telemetry(&json_builder, &gps_data));
+    }
+
     AZ_RETURN_IF_FAILED(az_json_writer_append_end_object(&json_builder));
     const az_span out_payload{ az_json_writer_get_bytes_used_in_destination(&json_builder) };
 
@@ -562,7 +574,8 @@ void setup()
     AccelSensor.begin(Wire1);
     AccelSensor.setOutputDataRate(LIS3DHTR_DATARATE_25HZ);
     AccelSensor.setFullScaleRange(LIS3DHTR_RANGE_2G);
-
+    DisplayPrintf("Initializing GPS");
+    InitGps();
     ButtonInit();
 
     ////////////////////
