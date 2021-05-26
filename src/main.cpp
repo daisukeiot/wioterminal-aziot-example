@@ -447,11 +447,11 @@ static void HandleCommandMessage(az_span payload, az_iot_hub_client_method_reque
             {
                 if (az_result_failed(rc = az_json_token_get_uint32(&json_reader.token, &duration)))
                 {
-                    Log("Duration: %dms" DLM, duration);
+                    Log("Couldn't parse JSON token res=%d" DLM, rc);
                 }
                 else
                 {
-                    Log("Couldn't parse JSON token res=%d" DLM, rc);
+                    Log("Duration: %dms" DLM, duration);
                 }
             }
 
@@ -593,6 +593,7 @@ void setup()
 
     ////////////////////
     // Sync time server
+    
     ntp.begin();
 
     ////////////////////
