@@ -485,7 +485,7 @@ static az_result SendButtonTelemetry(ButtonId id)
 static void HandleCommandMessage(az_span payload, az_iot_hub_client_method_request* command_request)
 {
     int command_res_code = 200;
-    az_result res;
+    az_result rc = AZ_OK;
 
     if (az_span_is_content_equal(AZ_SPAN_LITERAL_FROM_STR(COMMAND_RING_BUZZER), command_request->name))
     {
@@ -501,13 +501,13 @@ static void HandleCommandMessage(az_span payload, az_iot_hub_client_method_reque
         {
             if (az_json_reader_next_token(&json_reader) == AZ_OK)
             {
-                if ((res = az_json_token_get_uint32(&json_reader.token, &duration)) == AZ_OK)
+                if (az_result_failed(rc = az_json_token_get_uint32(&json_reader.token, &duration)))
                 {
-                    Log("Duration: %dms" DLM, duration);
+                    Log("Couldn't parse JSON token res=%d" DLM, rc);
                 }
                 else
                 {
-                    Log("Couldn't parse JSON token res=%d" DLM, res);
+                    Log("Duration: %dms" DLM, duration);
                 }
             }
 
@@ -517,9 +517,9 @@ static void HandleCommandMessage(az_span payload, az_iot_hub_client_method_reque
             analogWrite(WIO_BUZZER, 0);
 
             int rc;
-            if ((rc = SendCommandResponse(command_request, command_res_code, AZ_SPAN_LITERAL_FROM_STR("{}"))) != 0)
+            if (az_result_failed(rc = SendCommandResponse(command_request, command_res_code, AZ_SPAN_LITERAL_FROM_STR("{}"))))
             {
-                Log("Unable to send %d response, status %d" DLM, command_res_code, rc);
+                Log("Unable to send %d response, status 0x%08x" DLM, command_res_code, rc);
             }
         }
     }
@@ -529,16 +529,16 @@ static void HandleCommandMessage(az_span payload, az_iot_hub_client_method_reque
         Log("Unsupported command received: %.*s." DLM, az_span_size(command_request->name), az_span_ptr(command_request->name));
 
         int rc;
-        if ((rc = SendCommandResponse(command_request, 404, AZ_SPAN_LITERAL_FROM_STR("{}"))) != 0)
+        if (az_result_failed(rc = SendCommandResponse(command_request, 404, AZ_SPAN_LITERAL_FROM_STR("{}"))))
         {
-            printf("Unable to send %d response, status %d\n", 404, rc);
+            printf("Unable to send %d response, status 0x%08x\n", 404, rc);
         }
     }
 }
 
 static int SendCommandResponse(az_iot_hub_client_method_request* request, uint16_t status, az_span response)
 {
-    az_result rc;
+    az_result rc = AZ_OK;
     // Get the response topic to publish the command response
     char commands_response_topic[128];
     if (az_result_failed(rc = az_iot_hub_client_methods_response_get_publish_topic(&HubClient, request->request_id, status, commands_response_topic, sizeof(commands_response_topic), NULL)))
@@ -671,7 +671,7 @@ void setup()
 
     ////////////////////
     // Sync time server
-
+    
     ntp.begin();
 
     ////////////////////
